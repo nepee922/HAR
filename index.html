@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>基于 Qwen-VL 的人体动作识别与安全风险评估系统</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero__content">
+      <p class="eyebrow">Human Action Recognition Agent</p>
+      <h1>基于 Qwen-VL 的人体动作识别与安全风险评估系统</h1>
+      <p class="subtitle">
+        上传人体动作图片或短视频，系统调用 Qwen-VL 识别动作类别、场景语义与安全风险，并生成结构化分析结果。
+      </p>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel config-panel">
+      <div class="panel__heading">
+        <h2>1. API 配置</h2>
+        <span class="required-tag">必填</span>
+      </div>
+      <p class="hint">
+        API Key 只在浏览器端使用。请勿把 API Key 写入 GitHub 仓库代码。
+      </p>
+
+      <label class="field">
+        <span>DashScope / 百炼 API Key</span>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="sk-xxxxxxxxxxxxxxxx" />
+      </label>
+
+      <label class="field">
+        <span>OpenAI 兼容接口地址</span>
+        <input id="endpoint" type="text" value="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" />
+      </label>
+
+      <label class="field">
+        <span>模型</span>
+        <select id="modelName">
+          <option value="qwen3-vl-plus" selected>qwen3-vl-plus</option>
+          <option value="qwen3-vl-flash">qwen3-vl-flash</option>
+          <option value="qwen-vl-plus">qwen-vl-plus</option>
+          <option value="qwen-vl-max">qwen-vl-max</option>
+          <option value="qwen3.7-plus">qwen3.7-plus</option>
+        </select>
+      </label>
+
+      <div class="inline-options">
+        <label class="check-line">
+          <input id="rememberApi" type="checkbox" />
+          <span>在本浏览器保存 API Key</span>
+        </label>
+        <button id="clearConfig" class="ghost-button" type="button">清除本地配置</button>
+      </div>
+    </section>
+
+    <section class="panel upload-panel">
+      <div class="panel__heading">
+        <h2>2. 上传数据</h2>
+      </div>
+      <label id="dropZone" class="drop-zone" for="mediaInput">
+        <input id="mediaInput" type="file" accept="image/*,video/mp4,video/webm,video/quicktime" />
+        <span class="drop-zone__icon">+</span>
+        <span class="drop-zone__title">选择图片或短视频</span>
+        <span class="drop-zone__desc">支持 JPG、PNG、WEBP、MP4、WEBM、MOV</span>
+      </label>
+
+      <div class="media-tools">
+        <label class="field compact">
+          <span>视频抽帧数量</span>
+          <select id="frameCount">
+            <option value="4">4 帧</option>
+            <option value="6" selected>6 帧</option>
+            <option value="8">8 帧</option>
+          </select>
+        </label>
+        <label class="field compact">
+          <span>图像压缩尺寸</span>
+          <select id="maxSize">
+            <option value="768">最长边 768</option>
+            <option value="1024" selected>最长边 1024</option>
+            <option value="1280">最长边 1280</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="preview" class="preview empty">
+        <p>未选择文件</p>
+      </div>
+    </section>
+
+    <section class="panel task-panel">
+      <div class="panel__heading">
+        <h2>3. 识别任务</h2>
+      </div>
+
+      <label class="field">
+        <span>识别场景</span>
+        <select id="sceneType">
+          <option value="通用人体动作识别" selected>通用人体动作识别</option>
+          <option value="工地安全风险评估">工地安全风险评估</option>
+          <option value="实验室安全行为识别">实验室安全行为识别</option>
+          <option value="养老看护异常动作检测">养老看护异常动作检测</option>
+          <option value="校园公共区域安全分析">校园公共区域安全分析</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>动作标签集</span>
+        <textarea id="labels" rows="4">站立、行走、奔跑、坐下、起身、下蹲、弯腰、弯腰搬运、举手、挥手、攀爬、跳跃、摔倒、躺倒、推搡、打斗、求助、使用工具、佩戴防护装备、未佩戴防护装备、其他</textarea>
+      </label>
+
+      <button id="analyzeBtn" class="primary-button" type="button">开始识别</button>
+      <div id="status" class="status">等待上传文件与 API Key。</div>
+    </section>
+
+    <section class="panel result-panel">
+      <div class="panel__heading">
+        <h2>4. 分析结果</h2>
+        <button id="copyJson" class="ghost-button" type="button" disabled>复制 JSON</button>
+      </div>
+
+      <div id="resultCards" class="result-cards empty-result">
+        <p>识别完成后将在这里显示动作、风险等级、分析说明和建议。</p>
+      </div>
+
+      <details class="raw-box">
+        <summary>原始模型输出</summary>
+        <pre id="rawOutput">暂无输出</pre>
+      </details>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>演示说明：本系统仅用于人体动作与安全风险的辅助分析，不进行身份识别，不替代人工判断。</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
