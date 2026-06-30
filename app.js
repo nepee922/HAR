@@ -1,7 +1,16 @@
+const DEFAULT_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+const DEFAULT_MODEL = 'qwen3-vl-plus';
+
+const REHAB_LABELS = [
+  '站立平衡', '坐位平衡', '坐下', '起身', '坐站转换', '步行训练', '踏步训练',
+  '下蹲训练', '直腿抬高', '髋关节屈曲', '髋关节外展', '膝关节屈伸',
+  '踝泵运动', '足背屈', '足跖屈', '提踵训练', '抬臂训练', '肩关节前屈',
+  '肩关节外展', '肘关节屈伸', '腕关节屈伸', '手指张合', '桥式运动',
+  '核心稳定训练', '拉伸训练', '异常代偿动作', '摔倒风险动作', '其他'
+].join('、');
+
 const els = {
   apiKey: document.getElementById('apiKey'),
-  endpoint: document.getElementById('endpoint'),
-  modelName: document.getElementById('modelName'),
   rememberApi: document.getElementById('rememberApi'),
   clearConfig: document.getElementById('clearConfig'),
   mediaInput: document.getElementById('mediaInput'),
@@ -9,8 +18,6 @@ const els = {
   frameCount: document.getElementById('frameCount'),
   maxSize: document.getElementById('maxSize'),
   preview: document.getElementById('preview'),
-  sceneType: document.getElementById('sceneType'),
-  labels: document.getElementById('labels'),
   analyzeBtn: document.getElementById('analyzeBtn'),
   status: document.getElementById('status'),
   resultCards: document.getElementById('resultCards'),
@@ -22,9 +29,7 @@ let selectedFile = null;
 let lastStructuredResult = null;
 
 const STORAGE_KEYS = {
-  apiKey: 'qwen_action_api_key',
-  endpoint: 'qwen_action_endpoint',
-  model: 'qwen_action_model',
+  apiKey: 'qwen_rehab_api_key',
 };
 
 function setStatus(message, type = '') {
@@ -33,11 +38,7 @@ function setStatus(message, type = '') {
 }
 
 function loadLocalConfig() {
-  const endpoint = localStorage.getItem(STORAGE_KEYS.endpoint);
-  const model = localStorage.getItem(STORAGE_KEYS.model);
   const apiKey = localStorage.getItem(STORAGE_KEYS.apiKey);
-  if (endpoint) els.endpoint.value = endpoint;
-  if (model) els.modelName.value = model;
   if (apiKey) {
     els.apiKey.value = apiKey;
     els.rememberApi.checked = true;
@@ -45,8 +46,6 @@ function loadLocalConfig() {
 }
 
 function saveLocalConfig() {
-  localStorage.setItem(STORAGE_KEYS.endpoint, els.endpoint.value.trim());
-  localStorage.setItem(STORAGE_KEYS.model, els.modelName.value);
   if (els.rememberApi.checked) {
     localStorage.setItem(STORAGE_KEYS.apiKey, els.apiKey.value.trim());
   } else {
@@ -55,10 +54,10 @@ function saveLocalConfig() {
 }
 
 function clearLocalConfig() {
-  Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+  localStorage.removeItem(STORAGE_KEYS.apiKey);
   els.apiKey.value = '';
   els.rememberApi.checked = false;
-  setStatus('已清除本地配置。');
+  setStatus('已清除本地 API Key。');
 }
 
 function formatBytes(bytes) {
@@ -104,6 +103,15 @@ function updatePreview(file) {
   }
 }
 
+function fitSize(width, height, maxSide) {
+  if (width <= maxSide && height <= maxSide) return { width, height };
+  const scale = maxSide / Math.max(width, height);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 function fileToImageDataUrl(file, maxSide, quality = 0.86) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -124,15 +132,6 @@ function fileToImageDataUrl(file, maxSide, quality = 0.86) {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function fitSize(width, height, maxSide) {
-  if (width <= maxSide && height <= maxSide) return { width, height };
-  const scale = maxSide / Math.max(width, height);
-  return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
-  };
 }
 
 function waitForEvent(target, eventName, timeout = 10000) {
@@ -198,33 +197,38 @@ async function extractVideoFrames(file, frameCount, maxSide, quality = 0.82) {
   }
 }
 
-function buildPrompt({ sceneType, labels, isVideo }) {
+function buildPrompt({ isVideo }) {
   const mediaDesc = isVideo
-    ? '输入内容是一段短视频按时间顺序抽取的关键帧。请综合帧间变化判断动作，不要只描述单帧。'
-    : '输入内容是一张图片。请基于可见人体姿态、物体交互和场景线索判断动作。';
+    ? '输入内容是一段康复训练短视频按时间顺序抽取的关键帧。请综合帧间变化判断动作，不要只描述单帧。'
+    : '输入内容是一张康复训练图片。请基于可见人体姿态、肢体角度、支撑方式和场景线索判断动作。';
 
-  return `你是一个专业的人体动作识别与安全风险评估智能体。任务场景：${sceneType}。
+  return `你是一个专业的人体康复动作识别与动作规范评估智能体。
 ${mediaDesc}
 
-候选动作标签集：${labels}
+候选康复动作标签集：${REHAB_LABELS}
 
 请完成以下任务：
-1. 判断画面中的主要人体动作；
-2. 判断动作类别，例如日常动作、劳动动作、异常动作、安全风险动作；
-3. 评估风险等级，只能使用：低风险、中风险、高风险、未知；
-4. 给出简洁、专业、可执行的安全建议；
-5. 不要识别人物身份，不要猜测姓名、年龄、民族等个人身份信息。
+1. 判断画面中的主要康复训练动作，尽量从候选标签集中选择；
+2. 判断主要训练部位，例如上肢、下肢、躯干核心、平衡、步态、全身综合或未知；
+3. 判断动作类别，例如关节活动度训练、肌力训练、平衡训练、步态训练、功能性训练、拉伸训练或其他；
+4. 评估动作规范性，只能使用：规范、基本规范、不规范、未知；
+5. 评估风险等级，只能使用：低风险、中风险、高风险、未知；
+6. 给出简洁、专业、可执行的动作纠正建议；
+7. 不要识别人物身份，不要猜测姓名、年龄、民族、疾病诊断等个人身份或医疗诊断信息。
 
 必须只输出严格 JSON，不要输出 Markdown，不要输出代码块，不要添加 JSON 之外的文字。JSON 字段如下：
 {
-  "action": "主要动作，尽量从候选动作标签集中选择",
-  "category": "动作类别",
+  "action": "主要康复动作",
+  "body_part": "主要训练部位",
+  "category": "康复训练类别",
+  "standardness": "规范/基本规范/不规范/未知",
   "risk_level": "低风险/中风险/高风险/未知",
   "confidence": 0.0,
   "persons_count": 0,
   "scene": "场景简述",
   "description": "动作识别依据，不超过80字",
-  "suggestion": "安全或行为建议，不超过80字",
+  "correction": "动作纠正建议，不超过80字",
+  "rehab_note": "康复训练提示，不超过80字",
   "evidence": ["可见证据1", "可见证据2"],
   "labels": ["相关标签1", "相关标签2"]
 }`;
@@ -255,9 +259,9 @@ function buildContentPayload({ mediaPayload, prompt, isVideo }) {
   ];
 }
 
-async function callQwenVL({ apiKey, endpoint, model, content }) {
+async function callQwenVL({ apiKey, content }) {
   const payload = {
-    model,
+    model: DEFAULT_MODEL,
     messages: [
       {
         role: 'user',
@@ -267,7 +271,7 @@ async function callQwenVL({ apiKey, endpoint, model, content }) {
     temperature: 0.1,
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetch(DEFAULT_ENDPOINT, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -326,6 +330,14 @@ function riskClass(riskLevel) {
   return 'risk-unknown';
 }
 
+function standardClass(standardness) {
+  const text = String(standardness || '未知');
+  if (text.includes('不规范')) return 'risk-high';
+  if (text.includes('基本')) return 'risk-mid';
+  if (text.includes('规范')) return 'risk-low';
+  return 'risk-unknown';
+}
+
 function card(label, value, extraClass = '') {
   return `
     <div class="metric-card ${extraClass}">
@@ -335,9 +347,13 @@ function card(label, value, extraClass = '') {
   `;
 }
 
+function badge(value, className) {
+  return `<span class="risk-badge ${className}">${escapeHtml(value || '未知')}</span>`;
+}
+
 function renderResult(result) {
-  const risk = escapeHtml(result.risk_level || '未知');
-  const riskHtml = `<span class="risk-badge ${riskClass(result.risk_level)}">${risk}</span>`;
+  const riskHtml = badge(result.risk_level, riskClass(result.risk_level));
+  const standardHtml = badge(result.standardness, standardClass(result.standardness));
   const confidence = Number(result.confidence);
   const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}%` : '未知';
   const evidence = Array.isArray(result.evidence) ? result.evidence.join('；') : (result.evidence || '无');
@@ -345,32 +361,29 @@ function renderResult(result) {
 
   els.resultCards.className = 'result-cards';
   els.resultCards.innerHTML = [
-    card('主要动作', escapeHtml(result.action || '未知')),
-    card('动作类别', escapeHtml(result.category || '未知')),
+    card('主要康复动作', escapeHtml(result.action || '未知')),
+    card('训练部位', escapeHtml(result.body_part || '未知')),
+    card('动作规范性', standardHtml),
     card('风险等级', riskHtml),
+    card('训练类别', escapeHtml(result.category || '未知')),
     card('置信度', escapeHtml(confidenceText)),
     card('人数估计', escapeHtml(result.persons_count ?? '未知')),
-    card('场景简述', escapeHtml(result.scene || '未知'), 'wide'),
+    card('场景简述', escapeHtml(result.scene || '未知')),
     card('相关标签', escapeHtml(labels), 'wide'),
     card('识别依据', escapeHtml(result.description || '无'), 'wide'),
-    card('安全建议', escapeHtml(result.suggestion || '无'), 'wide'),
+    card('纠正建议', escapeHtml(result.correction || '无'), 'wide'),
+    card('康复提示', escapeHtml(result.rehab_note || '无'), 'wide'),
     card('可见证据', escapeHtml(evidence), 'full'),
   ].join('');
 }
 
 async function analyze() {
   const apiKey = els.apiKey.value.trim();
-  const endpoint = els.endpoint.value.trim();
-  const model = els.modelName.value.trim();
   const maxSide = Number(els.maxSize.value);
   const frameCount = Number(els.frameCount.value);
 
   if (!apiKey) {
     setStatus('请先填写 API Key。', 'error');
-    return;
-  }
-  if (!endpoint) {
-    setStatus('请填写 OpenAI 兼容接口地址。', 'error');
     return;
   }
   if (!selectedFile) {
@@ -397,13 +410,9 @@ async function analyze() {
       : { dataUrl: await fileToImageDataUrl(selectedFile, maxSide) };
 
     setStatus('正在调用 Qwen-VL，请等待模型返回结果...');
-    const prompt = buildPrompt({
-      sceneType: els.sceneType.value,
-      labels: els.labels.value.trim(),
-      isVideo,
-    });
+    const prompt = buildPrompt({ isVideo });
     const content = buildContentPayload({ mediaPayload, prompt, isVideo });
-    const { contentText, rawData } = await callQwenVL({ apiKey, endpoint, model, content });
+    const { contentText, rawData } = await callQwenVL({ apiKey, content });
 
     els.rawOutput.textContent = contentText;
     const parsed = parseModelJson(contentText);
@@ -458,10 +467,6 @@ function init() {
 
   els.mediaInput.addEventListener('change', (event) => {
     handleFile(event.target.files?.[0]);
-  });
-
-  [els.endpoint, els.modelName].forEach((el) => {
-    el.addEventListener('change', saveLocalConfig);
   });
 
   els.rememberApi.addEventListener('change', saveLocalConfig);
